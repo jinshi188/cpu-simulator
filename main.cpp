@@ -1,4 +1,4 @@
-// cpu-simulator -- 第四关：执行 addi 和 add
+// cpu-simulator -- 第六关：访存 lw / sw
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -8,7 +8,7 @@ static int32_t  reg[32];
 static uint8_t  mem[4096];
 static uint32_t pc = 0;
 
-// 从内存读一个 32 位指令字（小端）
+// 从内存读一个 32 位字（小端）
 static uint32_t fetch(uint32_t addr) {
     return (uint32_t)mem[addr]
         | ((uint32_t)mem[addr + 1] << 8)
@@ -47,71 +47,84 @@ static Decoded decode(uint32_t inst) {
 }
 
 // ---- 把 12 位立即数当成有符号数，扩展到 32 位 ----
-// 例：0x064 -> 100        0xFFF -> -1
-// 关键：看 bit11。它是 1 就说明这个数在补码里是负的，高 20 位要补满 1
 static int32_t sext12(uint32_t v) {
-    // ---------------- 空 1 ----------------
     return (int32_t)(v << 20) >> 20;
 }
 
-// ---- 写寄存器 ----
-// x0 是硬连线到 0 的寄存器，任何写入都必须丢掉
+// ---- 写寄存器：x0 恒为 0 ----
 static void write_reg(uint32_t idx, int32_t val) {
-    // ---------------- 空 2 ----------------
-    if(idx == 0) return;
+    if (idx == 0) return;
     reg[idx] = val;
 }
 
 // ---- 执行一条指令 ----
-// 返回 false = 遇到不支持的指令，停机
 static bool execute(const Decoded& d, uint32_t inst) {
     switch (d.opcode) {
 
-    case 0x13: {                        // I 型：addi 之类
+    case 0x13: {                        // I 型：addi
         int32_t imm = sext12((inst >> 20) & 0xFFF);
         int32_t a   = reg[d.rs1];
-        if (d.funct3 == 0x0) {          // 0x13 + funct3=000  =>  addi
-            // ---------------- 空 3 ----------------
-            int32_t res = a + imm;
-            write_reg(d.rd, res);
+        if (d.funct3 == 0x0) {
+            write_reg(d.rd, a + imm);
             printf("  addi  x%-2u <= %d\n", d.rd, reg[d.rd]);
             return true;
         }
         break;
     }
 
-    case 0x33: {                        // R 型：add 之类
+    case 0x33: {                        // R 型
         int32_t a = reg[d.rs1];
         int32_t b = reg[d.rs2];
         if (d.funct3 == 0x0 && d.funct7 == 0x00) {   // => add
-            // ---------------- 空 4 ----------------
-            int32_t res = a + b;
-            write_reg(d.rd, res);
+            write_reg(d.rd, a + b);
             printf("  add   x%-2u <= %d\n", d.rd, reg[d.rd]);
             return true;
         }
-        if (d.funct3 == 0x7 && d.funct7 == 0x00) {   // => add
-            // ---------------- 空 4 ----------------
-            int32_t res = a & b;
-            write_reg(d.rd, res);
-            printf("  add   x%-2u <= %d\n", d.rd, reg[d.rd]);
+        if (d.funct3 == 0x0 && d.funct7 == 0x20) {   // => sub
+            write_reg(d.rd, a - b);
+            printf("  sub   x%-2u <= %d\n", d.rd, reg[d.rd]);
             return true;
         }
-        if (d.funct3 == 0x0 && d.funct7 == 0x20) {   // => add
-            // ---------------- 空 4 ----------------
-            int32_t res = a - b;
-            write_reg(d.rd, res);
-            printf("  add   x%-2u <= %d\n", d.rd, reg[d.rd]);
+        if (d.funct3 == 0x7 && d.funct7 == 0x00) {   // => and
+            write_reg(d.rd, a & b);
+            printf("  and   x%-2u <= %d\n", d.rd, reg[d.rd]);
             return true;
         }
-        if (d.funct3 == 0x6 && d.funct7 == 0x00) {   // => add
-            // ---------------- 空 4 ----------------
-            int32_t res = a | b;
-            write_reg(d.rd, res);
-            printf("  add   x%-2u <= %d\n", d.rd, reg[d.rd]);
+        if (d.funct3 == 0x6 && d.funct7 == 0x00) {   // => or
+            write_reg(d.rd, a | b);
+            printf("  or    x%-2u <= %d\n", d.rd, reg[d.rd]);
             return true;
         }
         break;
+    }
+
+    case 0x03: {                        // I 型：lw（从内存读 4 字节进寄存器）
+        uint32_t addr = reg[d.rs1] + sext12((inst >> 20) & 0xFFF);
+        if (d.funct3 == 0x2) {
+            // ---------------- 空 1 ----------------
+            // 目标：把 mem[addr] 处的 4 字节读出来，写进 d.rd 号寄存器
+            // 提示：读内存用 fetch，写寄存器用 write_reg
+            write_reg(d.rd, (int32_t)fetch(addr));
+            printf("  lw    x%-2u <= %d  (来自 mem[0x%X])\n", d.rd, reg[d.rd], addr);
+            return true;
+        }
+        break;
+    }
+
+    case 0x23: {                        // S 型：sw（把寄存器写进内存 4 字节）
+        // ---------------- 空 2 ----------------
+        // S 型立即数被拆成了两段：
+        //   高 7 位 imm[11:5] 在 [31:25]
+        //   低 5 位 imm[4:0]  在 [11:7]（就是 rd 那个位置，S 型没有 rd）
+        // 目标：把两段拼回一个 12 位数，再做符号扩展
+        int32_t imm = sext12(((inst >> 25) << 5) | ((inst >> 7) & 0x1F));
+        uint32_t addr = reg[d.rs1] + imm;
+        // ---------------- 空 3 ----------------
+        // 目标：把 d.rs2 号寄存器的值写进 mem[addr]
+        // 提示：写内存用 store_word；注意数据来源是 rs2，不是 rd！
+        store_word(addr, (uint32_t)reg[d.rs2]);
+        printf("  sw    mem[0x%X] <= %d\n", addr, reg[d.rs2]);
+        return true;
     }
 
     }
@@ -120,15 +133,12 @@ static bool execute(const Decoded& d, uint32_t inst) {
     return false;
 }
 
-// 本关测试程序：只用 addi 和 add
+// 本关测试程序：访存专项
 static const uint32_t kProgram[] = {
-
-    0x00C00093,   // addi x1, x0, 12
-    0x00A00113,   // addi x2, x0, 10
-    0x402081B3,   // sub  x3, x1, x2
-    0x0020F233,   // and  x4, x1, x2
-    0x0020E2B3,   // or   x5, x1, x2
-
+    0x06400093,   // addi x1, x0, 100
+    0x00800113,   // addi x2, x0, 8
+    0x00112023,   // sw   x1, 0(x2)      -> mem[8] = 100
+    0x00012183,   // lw   x3, 0(x2)      -> x3 = 100
 };
 
 int main() {
@@ -140,7 +150,7 @@ int main() {
         store_word((uint32_t)(i * 4), kProgram[i]);
     }
 
-    printf("=== cpu-simulator v0.3 ===\n");
+    printf("=== cpu-simulator v0.4 ===\n");
 
     while (true) {
         uint32_t inst = fetch(pc);
@@ -157,6 +167,7 @@ int main() {
     for (int i = 0; i < 6; i++) {
         printf("  x%-2d = %d\n", i, reg[i]);
     }
+    printf("\nmem[0x8] 处的 4 字节 = %u\n", fetch(8));
     printf("halt: pc=0x%08X\n", pc);
     return 0;
 }
