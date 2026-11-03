@@ -133,12 +133,19 @@ static bool execute(const Decoded& d, uint32_t inst) {
     return false;
 }
 
-// 本关测试程序：访存专项
+// 第一版验收程序：9 条指令，把 7 条子集指令全用上
+// 编码公式：funct7<<25 | rs2<<20 | rs1<<15 | funct3<<12 | rd<<7 | opcode
+// 例：add x5,x3,x4 -> 4<<20 | 3<<15 | 5<<7 | 0x33 = 0x004182B3
 static const uint32_t kProgram[] = {
-    0x06400093,   // addi x1, x0, 100
-    0x00800113,   // addi x2, x0, 8
-    0x00112023,   // sw   x1, 0(x2)      -> mem[8] = 100
-    0x00012183,   // lw   x3, 0(x2)      -> x3 = 100
+    0x06400093,   // addi x1, x0, 100      -> x1 = 100
+    0x00800113,   // addi x2, x0, 8        -> x2 = 8
+    0x00112023,   // sw   x1, 0(x2)        -> mem[8] = 100
+    0x00012183,   // lw   x3, 0(x2)        -> x3 = 100
+    0x01600213,   // addi x4, x0, 22       -> x4 = 22
+    0x004182B3,   // add  x5, x3, x4       -> x5 = 122
+    0x0042F333,   // and  x6, x5, x4       -> x6 = 18
+    0x0042E3B3,   // or   x7, x5, x4       -> x7 = 126
+    0x40428433,   // sub  x8, x5, x4       -> x8 = 100
 };
 
 int main() {
@@ -150,13 +157,13 @@ int main() {
         store_word((uint32_t)(i * 4), kProgram[i]);
     }
 
-    printf("=== cpu-simulator v0.4 ===\n");
+    printf("=== cpu-simulator v1.0 ===\n");
 
     while (true) {
         uint32_t inst = fetch(pc);
         if (inst == 0) break;                    // 全 0 当停机
 
-        printf("pc=0x%08X inst=0x%08X\n", pc, inst);
+        printf("pc=0x%08X inst=0x%08X  ", pc, inst);   // 不换行，与下一行接成一条轨迹
         Decoded d = decode(inst);
         if (!execute(d, inst)) break;
 
@@ -164,7 +171,7 @@ int main() {
     }
 
     printf("\n-- 寄存器 --\n");
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < 9; i++) {
         printf("  x%-2d = %d\n", i, reg[i]);
     }
     printf("\nmem[0x8] 处的 4 字节 = %u\n", fetch(8));
