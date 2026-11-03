@@ -90,6 +90,27 @@ static bool execute(const Decoded& d, uint32_t inst) {
             printf("  add   x%-2u <= %d\n", d.rd, reg[d.rd]);
             return true;
         }
+        if (d.funct3 == 0x7 && d.funct7 == 0x00) {   // => add
+            // ---------------- 空 4 ----------------
+            int32_t res = a & b;
+            write_reg(d.rd, res);
+            printf("  add   x%-2u <= %d\n", d.rd, reg[d.rd]);
+            return true;
+        }
+        if (d.funct3 == 0x0 && d.funct7 == 0x20) {   // => add
+            // ---------------- 空 4 ----------------
+            int32_t res = a - b;
+            write_reg(d.rd, res);
+            printf("  add   x%-2u <= %d\n", d.rd, reg[d.rd]);
+            return true;
+        }
+        if (d.funct3 == 0x6 && d.funct7 == 0x00) {   // => add
+            // ---------------- 空 4 ----------------
+            int32_t res = a | b;
+            write_reg(d.rd, res);
+            printf("  add   x%-2u <= %d\n", d.rd, reg[d.rd]);
+            return true;
+        }
         break;
     }
 
@@ -101,11 +122,13 @@ static bool execute(const Decoded& d, uint32_t inst) {
 
 // 本关测试程序：只用 addi 和 add
 static const uint32_t kProgram[] = {
-    0x06400093,   // addi x1, x0, 100
-    0x00800113,   // addi x2, x0, 8
-    0x002081B3,   // add  x3, x1, x2
-    0xFFF00213,   // addi x4, x0, -1      <-- 符号扩展考场
-    0x001202B3,   // add  x5, x4, x1
+
+    0x00C00093,   // addi x1, x0, 12
+    0x00A00113,   // addi x2, x0, 10
+    0x402081B3,   // sub  x3, x1, x2
+    0x0020F233,   // and  x4, x1, x2
+    0x0020E2B3,   // or   x5, x1, x2
+
 };
 
 int main() {
