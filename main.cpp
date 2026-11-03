@@ -1,4 +1,4 @@
-// cpu-simulator -- 第三关：译码
+// cpu-simulator -- 第四关：执行 addi 和 add
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -16,7 +16,7 @@ static uint32_t fetch(uint32_t addr) {
         | ((uint32_t)mem[addr + 3] << 24);
 }
 
-// 往内存写一个 32 位字（小端）-- 就是 fetch 的反操作
+// 往内存写一个 32 位字（小端）
 static void store_word(uint32_t addr, uint32_t val) {
     mem[addr + 0] = (uint8_t)(val);
     mem[addr + 1] = (uint8_t)(val >> 8);
@@ -24,7 +24,7 @@ static void store_word(uint32_t addr, uint32_t val) {
     mem[addr + 3] = (uint8_t)(val >> 24);
 }
 
-// 一条指令拆出来的六个字段
+// 译码结果
 struct Decoded {
     uint32_t opcode;
     uint32_t rd;
@@ -35,29 +35,77 @@ struct Decoded {
 };
 
 // 把 32 位指令拆成字段
-// 规律：右移「这个字段的起始位」，再 &「(1<<宽度)-1」把上下的 bit 抹掉
 static Decoded decode(uint32_t inst) {
     Decoded d;
-    d.opcode = inst & 0x7F;             // [6:0]   7 位，起始位 0
-    d.rd     = (inst >> 7) & 0x1F;      // [11:7]  5 位，起始位 7
-    d.funct3 = (inst >> 12) & 0x7;                  // [14:12] 3 位，起始位 12
-    d.rs1    = (inst >> 15) & 0x1F;     // [19:15] 5 位，起始位 15
-    d.rs2    = (inst >> 20) & 0x1F;                  // [24:20] 5 位，起始位 20
-    d.funct7 = (inst >> 25) & 0x7F;                  // [31:25] 7 位，起始位 25
+    d.opcode = inst & 0x7F;
+    d.rd     = (inst >> 7) & 0x1F;
+    d.funct3 = (inst >> 12) & 0x7;
+    d.rs1    = (inst >> 15) & 0x1F;
+    d.rs2    = (inst >> 20) & 0x1F;
+    d.funct7 = (inst >> 25) & 0x7F;
     return d;
 }
 
-// 验收程序：9 条指令的机器码
+// ---- 把 12 位立即数当成有符号数，扩展到 32 位 ----
+// 例：0x064 -> 100        0xFFF -> -1
+// 关键：看 bit11。它是 1 就说明这个数在补码里是负的，高 20 位要补满 1
+static int32_t sext12(uint32_t v) {
+    // ---------------- 空 1 ----------------
+    return (int32_t)(v << 20) >> 20;
+}
+
+// ---- 写寄存器 ----
+// x0 是硬连线到 0 的寄存器，任何写入都必须丢掉
+static void write_reg(uint32_t idx, int32_t val) {
+    // ---------------- 空 2 ----------------
+    if(idx == 0) return;
+    reg[idx] = val;
+}
+
+// ---- 执行一条指令 ----
+// 返回 false = 遇到不支持的指令，停机
+static bool execute(const Decoded& d, uint32_t inst) {
+    switch (d.opcode) {
+
+    case 0x13: {                        // I 型：addi 之类
+        int32_t imm = sext12((inst >> 20) & 0xFFF);
+        int32_t a   = reg[d.rs1];
+        if (d.funct3 == 0x0) {          // 0x13 + funct3=000  =>  addi
+            // ---------------- 空 3 ----------------
+            int32_t res = a + imm;
+            write_reg(d.rd, res);
+            printf("  addi  x%-2u <= %d\n", d.rd, reg[d.rd]);
+            return true;
+        }
+        break;
+    }
+
+    case 0x33: {                        // R 型：add 之类
+        int32_t a = reg[d.rs1];
+        int32_t b = reg[d.rs2];
+        if (d.funct3 == 0x0 && d.funct7 == 0x00) {   // => add
+            // ---------------- 空 4 ----------------
+            int32_t res = a + b;
+            write_reg(d.rd, res);
+            printf("  add   x%-2u <= %d\n", d.rd, reg[d.rd]);
+            return true;
+        }
+        break;
+    }
+
+    }
+
+    printf("  [不支持] opcode=0x%X funct3=%u funct7=%u\n", d.opcode, d.funct3, d.funct7);
+    return false;
+}
+
+// 本关测试程序：只用 addi 和 add
 static const uint32_t kProgram[] = {
     0x06400093,   // addi x1, x0, 100
     0x00800113,   // addi x2, x0, 8
-    0x00112023,   // sw   x1, 0(x2)
-    0x00012183,   // lw   x3, 0(x2)
-    0x01600213,   // addi x4, x0, 22
-    0x004182B3,   // add  x5, x3, x4
-    0x0042F333,   // and  x6, x5, x4
-    0x0042E3B3,   // or   x7, x5, x4
-    0x40428433,   // sub  x8, x5, x4
+    0x002081B3,   // add  x3, x1, x2
+    0xFFF00213,   // addi x4, x0, -1      <-- 符号扩展考场
+    0x001202B3,   // add  x5, x4, x1
 };
 
 int main() {
@@ -65,26 +113,27 @@ int main() {
     memset(mem, 0, sizeof(mem));
     pc = 0;
 
-    // 把程序装到内存里，从地址 0 开始
     for (size_t i = 0; i < sizeof(kProgram) / sizeof(kProgram[0]); i++) {
         store_word((uint32_t)(i * 4), kProgram[i]);
     }
 
-    printf("=== cpu-simulator v0.2 ===\n");
-    printf("%-10s %-7s %-3s %-3s %-4s %-4s %-4s\n",
-           "inst", "opcode", "rd", "f3", "rs1", "rs2", "f7");
+    printf("=== cpu-simulator v0.3 ===\n");
 
     while (true) {
         uint32_t inst = fetch(pc);
-        if (inst == 0) break;            // 全 0 当停机
+        if (inst == 0) break;                    // 全 0 当停机
 
+        printf("pc=0x%08X inst=0x%08X\n", pc, inst);
         Decoded d = decode(inst);
-        printf("0x%08X 0x%-5X %-3u %-3u %-4u %-4u %-4u\n",
-               inst, d.opcode, d.rd, d.funct3, d.rs1, d.rs2, d.funct7);
+        if (!execute(d, inst)) break;
 
-        pc += 4;
+        pc += 4;                                 // 执行成功才前进
     }
 
+    printf("\n-- 寄存器 --\n");
+    for (int i = 0; i < 6; i++) {
+        printf("  x%-2d = %d\n", i, reg[i]);
+    }
     printf("halt: pc=0x%08X\n", pc);
     return 0;
 }
